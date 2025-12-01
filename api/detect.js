@@ -1,4 +1,4 @@
-// api/detect.js - Main Detection Endpoint
+// api/detect.js - Main Detection Endpoint (Native Fetch - No Dependencies!)
 // Images are NEVER stored - deleted immediately after processing
 import formidable from 'formidable';
 import fs from 'fs';
@@ -12,12 +12,6 @@ const MAX_REQUESTS = 5; // 5 requests per hour
 // Allowed file settings
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 const ALLOWED_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
-
-const response = await fetch(`${apiUrl}?api_key=${apiKey}`, {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-  body: base64Image,
-});
 
 // Get client IP address
 function getClientIP(req) {
@@ -84,7 +78,7 @@ function deleteImageFile(filePath) {
   }
 }
 
-// Call Roboflow API
+// Call Roboflow API using NATIVE FETCH (no dependencies!)
 async function callRoboflowAPI(base64Image, apiUrl, apiKey) {
   const response = await fetch(`${apiUrl}?api_key=${apiKey}`, {
     method: 'POST',
