@@ -1,7 +1,6 @@
 // api/detect.js - Main Detection Endpoint
 // Images are NEVER stored - deleted immediately after processing
 import formidable from 'formidable';
-import fetch from 'node-fetch';
 import fs from 'fs';
 import { logDetection } from '../lib/database.js';
 
@@ -13,6 +12,12 @@ const MAX_REQUESTS = 5; // 5 requests per hour
 // Allowed file settings
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 const ALLOWED_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+
+const response = await fetch(`${apiUrl}?api_key=${apiKey}`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+  body: base64Image,
+});
 
 // Get client IP address
 function getClientIP(req) {
