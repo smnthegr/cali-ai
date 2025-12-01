@@ -13,11 +13,6 @@ const MAX_REQUESTS = 5; // 5 requests per hour
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 const ALLOWED_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
 
-// Check if rate limiting is paused via environment variable
-const isRateLimitPaused = () => {
-  return process.env.RATE_LIMIT_PAUSE === 'true';
-};
-
 // Get client IP address
 function getClientIP(req) {
   return req.headers['x-forwarded-for']?.split(',')[0].trim() || 
@@ -28,12 +23,6 @@ function getClientIP(req) {
 
 // Check rate limit
 function checkRateLimit(ip) {
-  // If rate limiting is paused, always allow the request
-  if (isRateLimitPaused()) {
-    console.log('⚠️ Rate limiting is PAUSED (testing mode)');
-    return { allowed: true, remaining: 999, paused: true };
-  }
-  
   const now = Date.now();
   const userRecord = rateLimitMap.get(ip);
   
@@ -143,14 +132,8 @@ export default async function handler(req, res) {
     const clientIP = getClientIP(req);
     const rateLimit = checkRateLimit(clientIP);
     
-    // Set rate limit headers (show paused status if applicable)
-    if (rateLimit.paused) {
-      res.setHeader('X-RateLimit-Status', 'PAUSED');
-      res.setHeader('X-RateLimit-Remaining', '∞');
-    } else {
-      res.setHeader('X-RateLimit-Limit', MAX_REQUESTS);
-      res.setHeader('X-RateLimit-Remaining', rateLimit.remaining);
-    }
+    res.setHeader('X-RateLimit-Limit', MAX_REQUESTS);
+    res.setHeader('X-RateLimit-Remaining', rateLimit.remaining);
     
     if (!rateLimit.allowed) {
       const resetDate = new Date(rateLimit.resetTime);
@@ -217,25 +200,27 @@ export default async function handler(req, res) {
     console.log('Calling Model 1 (verification)...');
     const model1Response = await callRoboflowAPI(base64Image, MODEL1_URL, API_KEY);
 
-    // Debugging: log everything
-    console.log("Model 1 Raw Response:", JSON.stringify(model1Response, null, 2));
+// Debugging: log everything
+console.log("Model 1 Raw Response:", JSON.stringify(model1Response, null, 2));
 
-    // Get predictions and sort by confidence
-    const predictions = model1Response.predictions || [];
-    const bestPrediction = predictions.sort((a, b) => b.confidence - a.confidence)[0];
+// Instead of just taking the first prediction blindly:
+const predictions = model1Response.predictions || [];
+const topPrediction = predictions[0];
 
-    if (!bestPrediction) {
+console.log("Top Prediction:", topPrediction);
+
+    
+    const model1Prediction = model1Response.predictions?.[0] || model1Response.top;
+    if (!model1Prediction) {
       deleteImageFile(uploadedFilePath);
       return res.status(500).json({
         error: 'Model 1 returned no predictions',
         type: 'model_error'
       });
     }
-
-    console.log("Top Prediction:", bestPrediction);
-
-    const model1Class = bestPrediction.class || bestPrediction.className;
-    const model1Confidence = Math.round((bestPrediction.confidence || 0) * 100);
+    
+    const model1Class = model1Prediction.class || model1Prediction.className;
+    const model1Confidence = Math.round((model1Prediction.confidence || 0) * 100);
     
     // Verify it's a calamansi
     const isCalamansi = model1Class?.toLowerCase().includes('calamansi');
@@ -312,9 +297,7 @@ export default async function handler(req, res) {
         width: imageWidth,
         height: imageHeight
       }
-    }).catch(err => {
-      console.error('Logging error:', err);
-    });
+    }).catch(err => console.error('Logging error:', err));
     
     // DELETE IMAGE IMMEDIATELY (before sending response)
     deleteImageFile(uploadedFilePath);
