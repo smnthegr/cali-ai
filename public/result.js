@@ -26,8 +26,18 @@ const diseaseInfo = {
   }
 };
 
-// Function to draw image with bounding box
-function drawImageWithBoundingBox(imageSrc, boundingBox, confidence, diseaseClass, originalWidth, originalHeight) {
+// Color palette for multiple bounding boxes
+const boxColors = [
+  '#00FF00', // Green
+  '#FF00FF', // Magenta
+  '#00FFFF', // Cyan
+  '#FFFF00', // Yellow
+  '#FF6600', // Orange
+  '#FF0066'  // Pink
+];
+
+// Function to draw image with multiple bounding boxes
+function drawImageWithBoundingBoxes(imageSrc, predictions, originalWidth, originalHeight) {
   const canvas = document.getElementById('resultCanvas');
   const ctx = canvas.getContext('2d');
   const img = new Image();
@@ -40,31 +50,47 @@ function drawImageWithBoundingBox(imageSrc, boundingBox, confidence, diseaseClas
     // Draw the image
     ctx.drawImage(img, 0, 0);
     
-    // Calculate scaling factor (Roboflow coordinates are based on original image size)
+    // Calculate scaling factor
     const scaleX = img.width / originalWidth;
     const scaleY = img.height / originalHeight;
     
-    // Convert center coordinates to top-left corner coordinates and scale
-    const x = (boundingBox.x - boundingBox.width / 2) * scaleX;
-    const y = (boundingBox.y - boundingBox.height / 2) * scaleY;
-    const width = boundingBox.width * scaleX;
-    const height = boundingBox.height * scaleY;
-    
-    // Draw bounding box
-    ctx.strokeStyle = '#00FF00'; // Green color
-    ctx.lineWidth = 3;
-    ctx.strokeRect(x, y, width, height);
-    
-    // Draw semi-transparent background for label
-    ctx.fillStyle = 'rgba(0, 255, 0, 0.7)';
-    const labelText = `${diseaseClass} (${confidence}%)`;
-    ctx.font = 'bold 16px Arial';
-    const textWidth = ctx.measureText(labelText).width;
-    ctx.fillRect(x, y - 25, textWidth + 10, 25);
-    
-    // Draw label text
-    ctx.fillStyle = '#000000';
-    ctx.fillText(labelText, x + 5, y - 7);
+    // Draw each bounding box
+    predictions.forEach((pred, index) => {
+      const boundingBox = pred.boundingBox;
+      const color = boxColors[index % boxColors.length];
+      
+      // Convert center coordinates to top-left corner coordinates and scale
+      const x = (boundingBox.x - boundingBox.width / 2) * scaleX;
+      const y = (boundingBox.y - boundingBox.height / 2) * scaleY;
+      const width = boundingBox.width * scaleX;
+      const height = boundingBox.height * scaleY;
+      
+      // Draw bounding box
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 3;
+      ctx.strokeRect(x, y, width, height);
+      
+      // Get disease info for label
+      const classKey = pred.class.toLowerCase();
+      const info = diseaseInfo[classKey] || { name: pred.class };
+      
+      // Draw semi-transparent background for label
+      ctx.fillStyle = color.replace(')', ', 0.8)').replace('rgb', 'rgba').replace('#', 'rgba(');
+      // Convert hex to rgba
+      const r = parseInt(color.slice(1, 3), 16);
+      const g = parseInt(color.slice(3, 5), 16);
+      const b = parseInt(color.slice(5, 7), 16);
+      ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.8)`;
+      
+      const labelText = `${info.name} (${pred.confidence}%)`;
+      ctx.font = 'bold 16px Arial';
+      const textWidth = ctx.measureText(labelText).width;
+      ctx.fillRect(x, y - 25, textWidth + 10, 25);
+      
+      // Draw label text
+      ctx.fillStyle = '#000000';
+      ctx.fillText(labelText, x + 5, y - 7);
+    });
   };
   
   img.src = imageSrc;
@@ -95,45 +121,71 @@ window.addEventListener('DOMContentLoaded', function() {
     return;
   }
   
-  // Display verification badge
+  // Display verification badge (hidden)
   const verificationBadge = document.getElementById('verificationBadge');
   if (verificationBadge) {
     verificationBadge.style.display = 'none';
     verificationBadge.textContent = `✓ Verified as Calamansi (${result.model1.confidence}%)`;
   }
   
-  // Get disease info
-  const classKey = result.model2.class.toLowerCase();
-  const info = diseaseInfo[classKey] || {
-    name: result.model2.class,
-    description: 'Disease detected. Please consult with an agricultural expert for proper diagnosis and treatment.'
-  };
+  // Use ALL predictions with bounding boxes from API
+  const predictions = result.allPredictions || [{
+    class: result.model2.class,
+    confidence: result.model2.confidence,
+    boundingBox: result.model2.boundingBox
+  }];
   
-  console.log('Disease detected:', info.name);
-  console.log('Confidence:', result.model2.confidence + '%');
+  console.log(`Drawing ${predictions.length} detection(s):`, predictions);
   
-  // Draw image with bounding box
-  if (result.imageSrc && result.model2.boundingBox) {
-    drawImageWithBoundingBox(
+  // Draw image with all bounding boxes
+  if (result.imageSrc) {
+    drawImageWithBoundingBoxes(
       result.imageSrc,
-      result.model2.boundingBox,
-      result.model2.confidence,
-      info.name,
+      predictions,
       result.imageWidth,
       result.imageHeight
     );
   } else {
-    console.error('Missing image or bounding box data');
+    console.error('Missing image data');
   }
   
-  // Display the results
+  // Display primary detection
+  const classKey = result.model2.class.toLowerCase();
+  const primaryInfo = diseaseInfo[classKey] || {
+    name: result.model2.class,
+    description: 'Disease detected. Please consult with an agricultural expert for proper diagnosis and treatment.'
+  };
+  
+  console.log('Primary disease detected:', primaryInfo.name);
+  console.log('Confidence:', result.model2.confidence + '%');
+  
+  // Display the primary results
   const diseaseNameEl = document.getElementById('diseaseName');
   const confidenceEl = document.getElementById('confidence');
   const descriptionEl = document.getElementById('description');
   
-  if (diseaseNameEl) diseaseNameEl.textContent = info.name;
+  if (diseaseNameEl) {
+    // Show primary detection
+    diseaseNameEl.textContent = primaryInfo.name;
+    
+    // Add additional detections if available
+    if (result.allPredictions && result.allPredictions.length > 1) {
+      const additionalDetections = result.allPredictions.slice(1, 3).map(pred => {
+        const info = diseaseInfo[pred.class.toLowerCase()] || { name: pred.class };
+        return `${info.name} (${pred.confidence}%)`;
+      });
+      
+      if (additionalDetections.length > 0) {
+        diseaseNameEl.innerHTML = `
+          <strong>Primary:</strong> ${primaryInfo.name}<br>
+          <small style="opacity: 0.8;">Also detected: ${additionalDetections.join(', ')}</small>
+        `;
+      }
+    }
+  }
+  
   if (confidenceEl) confidenceEl.textContent = result.model2.confidence + '%';
-  if (descriptionEl) descriptionEl.textContent = info.description;
+  if (descriptionEl) descriptionEl.textContent = primaryInfo.description;
   
   // Log all predictions for debugging
   if (result.allPredictions) {

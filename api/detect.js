@@ -12,6 +12,7 @@ const MAX_REQUESTS = 5; // 5 requests per hour
 // Allowed file settings
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 const ALLOWED_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+const MIN_CONFIDENCE = 0.3;
 
 // Get client IP address
 function getClientIP(req) {
@@ -250,14 +251,21 @@ console.log("Top Prediction:", topPrediction);
     console.log('Calling Model 2 (disease detection)...');
     const model2Response = await callRoboflowAPI(base64Image, MODEL2_URL, API_KEY);
     
-    const model2Prediction = model2Response.predictions?.[0];
-    if (!model2Prediction) {
-      deleteImageFile(uploadedFilePath);
-      return res.status(500).json({
-        error: 'Model 2 returned no predictions',
-        type: 'model_error'
-      });
-    }
+    // Filter predictions by minimum confidence and sort by confidence
+const validPredictions = (model2Response.predictions || [])
+  .filter(pred => pred.confidence >= MIN_CONFIDENCE)
+  .sort((a, b) => b.confidence - a.confidence);
+
+if (validPredictions.length === 0) {
+  deleteImageFile(uploadedFilePath);
+  return res.status(500).json({
+    error: 'Model 2 returned no valid predictions',
+    type: 'model_error'
+  });
+}
+
+// Get the primary (highest confidence) detection
+const model2Prediction = validPredictions[0];
     
     const model2Class = model2Prediction.class;
     const model2Confidence = Math.round(model2Prediction.confidence * 100);
@@ -271,10 +279,19 @@ console.log("Top Prediction:", topPrediction);
     const imageWidth = model2Response.image?.width || 640;
     const imageHeight = model2Response.image?.height || 640;
     
-    const allPredictions = model2Response.predictions?.map(pred => ({
-      class: pred.class,
-      confidence: Math.round(pred.confidence * 100)
-    })) || [];
+    // Include ALL predictions with their bounding boxes
+const allPredictions = validPredictions.map(pred => ({
+  class: pred.class,
+  confidence: Math.round(pred.confidence * 100),
+  boundingBox: {
+    x: pred.x,
+    y: pred.y,
+    width: pred.width,
+    height: pred.height
+  }
+}));
+
+console.log(`Found ${allPredictions.length} valid detections`);
     
     // Prepare response
     const timestamp = new Date().toISOString();
@@ -292,6 +309,7 @@ console.log("Top Prediction:", topPrediction);
       imageWidth: imageWidth,
       imageHeight: imageHeight,
       allPredictions: allPredictions,
+      detectionCount: allPredictions.length,
       timestamp: timestamp
     };
     
