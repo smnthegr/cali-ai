@@ -13,11 +13,6 @@ const MAX_REQUESTS = 5; // 5 requests per hour
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 const ALLOWED_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
 
-// Check if rate limiting is paused via environment variable
-const isRateLimitPaused = () => {
-  return process.env.RATE_LIMIT_PAUSE === 'true';
-};
-
 // Get client IP address
 function getClientIP(req) {
   return req.headers['x-forwarded-for']?.split(',')[0].trim() || 
@@ -28,12 +23,6 @@ function getClientIP(req) {
 
 // Check rate limit
 function checkRateLimit(ip) {
-  // If rate limiting is paused, always allow the request
-  if (isRateLimitPaused()) {
-    console.log('⚠️ Rate limiting is PAUSED (testing mode)');
-    return { allowed: true, remaining: 999, paused: true };
-  }
-  
   const now = Date.now();
   const userRecord = rateLimitMap.get(ip);
   
@@ -143,14 +132,8 @@ export default async function handler(req, res) {
     const clientIP = getClientIP(req);
     const rateLimit = checkRateLimit(clientIP);
     
-    // Set rate limit headers (show paused status if applicable)
-    if (rateLimit.paused) {
-      res.setHeader('X-RateLimit-Status', 'PAUSED');
-      res.setHeader('X-RateLimit-Remaining', '∞');
-    } else {
-      res.setHeader('X-RateLimit-Limit', MAX_REQUESTS);
-      res.setHeader('X-RateLimit-Remaining', rateLimit.remaining);
-    }
+    res.setHeader('X-RateLimit-Limit', MAX_REQUESTS);
+    res.setHeader('X-RateLimit-Remaining', rateLimit.remaining);
     
     if (!rateLimit.allowed) {
       const resetDate = new Date(rateLimit.resetTime);
@@ -215,6 +198,118 @@ export default async function handler(req, res) {
     
     // Call Model 1 (Calamansi verification)
     console.log('Calling Model 1 (verification)...');
+    const model1Response = await callRoboflowAPI(base64Image, MODEL1_URL, API_KEY);
+
+// Debugging: log everything
+console.log("Model 1 Raw Response:", JSON.stringify(model1Response, null, 2));
+
+// Instead of just taking the first prediction blindly:
+const predictions = model1Response.predictions || [];
+const bestPrediction = predictions.sort((a, b) => b.confidence - a.confidence)[0];
+
+if (!bestPrediction || bestPrediction.class.toLowerCase() !== "calamansi" || bestPrediction.confidence < 0.5) {
+  deleteImageFile(uploadedFilePath);
+  return res.status(400).json({
+    error: "Image does not appear to be a calamansi plant.",
+    type: "validation_error",
+    detected: bestPrediction?.class,
+    confidence: bestPrediction?.confidence
+  });
+}
+
+const topPrediction = predictions[0];
+
+console.log("Top Prediction:", topPrediction);
+
+    
+    const model1Prediction = model1Response.predictions?.[0] || model1Response.top;
+    if (!model1Prediction) {
+      deleteImageFile(uploadedFilePath);
+      return res.status(500).json({
+        error: 'Model 1 returned no predictions',
+        type: 'model_error'
+      });
+    }
+    
+    const model1Class = model1Prediction.class || model1Prediction.className;
+    const model1Confidence = Math.round((model1Prediction.confidence || 0) * 100);
+    
+    // Verify it's a calamansi
+    const isCalamansi = model1Class?.toLowerCase().includes('calamansi');
+    if (!isCalamansi || model1Confidence < 50) {
+      deleteImageFile(uploadedFilePath);
+      return res.status(400).json({
+        error: 'Image does not appear to be a calamansi plant. Please upload a clear photo of a calamansi.',
+        type: 'validation_error',
+        detected: model1Class,
+        confidence: model1Confidence
+      });
+    }
+    
+    // Call Model 2 (Disease detection)
+    console.log('Calling Model 2 (disease detection)...');
+    const model2Response = await callRoboflowAPI(base64Image, MODEL2_URL, API_KEY);
+    
+    const model2Prediction = model2Response.predictions?.[0];
+    if (!model2Prediction) {
+      deleteImageFile(uploadedFilePath);
+      return res.status(500).json({
+        error: 'Model 2 returned no predictions',
+        type: 'model_error'
+      });
+    }
+    
+    const model2Class = model2Prediction.class;
+    const model2Confidence = Math.round(model2Prediction.confidence * 100);
+    const boundingBox = {
+      x: model2Prediction.x,
+      y: model2Prediction.y,
+      width: model2Prediction.width,
+      height: model2Prediction.height
+    };
+    
+    const imageWidth = model2Response.image?.width || 640;
+    const imageHeight = model2Response.image?.height || 640;
+    
+    const allPredictions = model2Response.predictions?.map(pred => ({
+      class: pred.class,
+      confidence: Math.round(pred.confidence * 100)
+    })) || [];
+    
+    // Prepare response
+    const timestamp = new Date().toISOString();
+    const responseData = {
+      model1: {
+        class: model1Class,
+        confidence: model1Confidence
+      },
+      model2: {
+        class: model2Class,
+        confidence: model2Confidence,
+        boundingBox: boundingBox
+      },
+      imageData: `data:${imageFile.mimetype};base64,${base64Image}`,
+      imageWidth: imageWidth,
+      imageHeight: imageHeight,
+      allPredictions: allPredictions,
+      timestamp: timestamp
+    };
+    
+    // Log to database (async, don't wait)
+    logDetection({
+      timestamp,
+      ip: clientIP,
+      model1Class,
+      model1Confidence,
+      model2Class,
+      model2Confidence,
+      imageMeta: {
+        size: imageFile.size,
+        type: imageFile.mimetype,
+        width: imageWidth,
+        height: imageHeight
+      }
+    }).catch(err => console.error('Logging error:', err));
     
     // DELETE IMAGE IMMEDIATELY (before sending response)
     deleteImageFile(uploadedFilePath);
