@@ -199,6 +199,28 @@ export default async function handler(req, res) {
     // Call Model 1 (Calamansi verification)
     console.log('Calling Model 1 (verification)...');
     const model1Response = await callRoboflowAPI(base64Image, MODEL1_URL, API_KEY);
+
+// Debugging: log everything
+console.log("Model 1 Raw Response:", JSON.stringify(model1Response, null, 2));
+
+// Instead of just taking the first prediction blindly:
+const predictions = model1Response.predictions || [];
+const bestPrediction = predictions.sort((a, b) => b.confidence - a.confidence)[0];
+
+if (!bestPrediction || bestPrediction.class.toLowerCase() !== "calamansi" || bestPrediction.confidence < 0.5) {
+  deleteImageFile(uploadedFilePath);
+  return res.status(400).json({
+    error: "Image does not appear to be a calamansi plant.",
+    type: "validation_error",
+    detected: bestPrediction?.class,
+    confidence: bestPrediction?.confidence
+  });
+}
+
+const topPrediction = predictions[0];
+
+console.log("Top Prediction:", topPrediction);
+
     
     const model1Prediction = model1Response.predictions?.[0] || model1Response.top;
     if (!model1Prediction) {
