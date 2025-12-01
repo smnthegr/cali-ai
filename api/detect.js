@@ -220,36 +220,22 @@ export default async function handler(req, res) {
     // Debugging: log everything
     console.log("Model 1 Raw Response:", JSON.stringify(model1Response, null, 2));
 
-    // Instead of just taking the first prediction blindly:
+    // Get predictions and sort by confidence
     const predictions = model1Response.predictions || [];
     const bestPrediction = predictions.sort((a, b) => b.confidence - a.confidence)[0];
 
-    if (!bestPrediction || bestPrediction.class.toLowerCase() !== "calamansi" || bestPrediction.confidence < 0.5) {
-      deleteImageFile(uploadedFilePath);
-      return res.status(400).json({
-        error: "Image does not appear to be a calamansi plant.",
-        type: "validation_error",
-        detected: bestPrediction?.class,
-        confidence: bestPrediction?.confidence
-      });
-    }
-
-    const topPrediction = predictions[0];
-
-    console.log("Top Prediction:", topPrediction);
-
-    
-    const model1Prediction = model1Response.predictions?.[0] || model1Response.top;
-    if (!model1Prediction) {
+    if (!bestPrediction) {
       deleteImageFile(uploadedFilePath);
       return res.status(500).json({
         error: 'Model 1 returned no predictions',
         type: 'model_error'
       });
     }
-    
-    const model1Class = model1Prediction.class || model1Prediction.className;
-    const model1Confidence = Math.round((model1Prediction.confidence || 0) * 100);
+
+    console.log("Top Prediction:", bestPrediction);
+
+    const model1Class = bestPrediction.class || bestPrediction.className;
+    const model1Confidence = Math.round((bestPrediction.confidence || 0) * 100);
     
     // Verify it's a calamansi
     const isCalamansi = model1Class?.toLowerCase().includes('calamansi');
@@ -326,7 +312,9 @@ export default async function handler(req, res) {
         width: imageWidth,
         height: imageHeight
       }
-    }).catch(err => console.error('Logging error:', err));
+    }).catch(err => {
+      console.error('Logging error:', err);
+    });
     
     // DELETE IMAGE IMMEDIATELY (before sending response)
     deleteImageFile(uploadedFilePath);
