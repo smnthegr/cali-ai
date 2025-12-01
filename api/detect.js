@@ -136,7 +136,7 @@ export default async function handler(req, res) {
     
     res.setHeader('X-RateLimit-Limit', MAX_REQUESTS);
     res.setHeader('X-RateLimit-Remaining', rateLimit.remaining);
-    
+    }
     if (!rateLimit.allowed) {
       const resetDate = new Date(rateLimit.resetTime);
       res.setHeader('X-RateLimit-Reset', resetDate.toISOString());
