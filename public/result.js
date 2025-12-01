@@ -98,7 +98,7 @@ window.addEventListener('DOMContentLoaded', function() {
   // Display verification badge
   const verificationBadge = document.getElementById('verificationBadge');
   if (verificationBadge) {
-    verificationBadge.style.display = 'block';
+    verificationBadge.style.display = 'none';
     verificationBadge.textContent = `✓ Verified as Calamansi (${result.model1.confidence}%)`;
   }
   
