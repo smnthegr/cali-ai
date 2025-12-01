@@ -130,13 +130,11 @@ export default async function handler(req, res) {
     
     // Check rate limit
     const clientIP = getClientIP(req);
-    const RATE_LIMIT_PAUSED = process.env.RATE_LIMIT_PAUSED === "true";
-    if (!RATE_LIMIT_PAUSED) {
-        const rateLimit = checkRateLimit(clientIP);
+    const rateLimit = checkRateLimit(clientIP);
     
     res.setHeader('X-RateLimit-Limit', MAX_REQUESTS);
     res.setHeader('X-RateLimit-Remaining', rateLimit.remaining);
-    }
+    
     if (!rateLimit.allowed) {
       const resetDate = new Date(rateLimit.resetTime);
       res.setHeader('X-RateLimit-Reset', resetDate.toISOString());
